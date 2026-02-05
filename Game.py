@@ -3,109 +3,123 @@ import streamlit.components.v1 as components
 import time
 
 # --- KONFIGURATION ---
-st.set_page_config(page_title="1vs1 Streamlit Battle", layout="centered")
+st.set_page_config(page_title="1vs1 Retro Battle", layout="centered")
 
 # Initialisierung des Spielzustands
 if 'p1_pos' not in st.session_state:
     st.session_state.update({
-        'p1_pos': [20, 50], # [x, y] in Prozent
-        'p2_pos': [80, 50],
+        'p1_pos': [100, 200], # [x, y]
+        'p2_pos': [500, 200],
         'p1_score': 0,
         'p2_score': 0,
-        'p1_cd': 0, # Cooldown Zeitstempel
+        'p1_cd': 0, # Cooldown
         'p2_cd': 0,
-        'last_update': time.time()
+        'orb_pos': [300, 200],
+        'game_over': False
     })
 
-# --- JAVASCRIPT FÜR TASTATUR ---
-# Dieses Skript fängt Tasten ab und sendet sie an Streamlit zurück
-keystroke_js = """
-<script>
-const doc = window.parent.document;
-doc.addEventListener('keydown', function(e) {
-    const key = e.key.toLowerCase();
-    // Wir senden die Taste an ein verstecktes Streamlit-Input-Feld oder nutzen die API
-    window.parent.postMessage({
-        type: 'streamlit:setComponentValue',
-        value: key,
-    }, '*');
-});
-</script>
-"""
-components.html(keystroke_js, height=0)
+# --- JAVASCRIPT FÜR TASTATURSTEUERUNG ---
+# Dieser Teil fängt die Tasten ab und sendet sie an Streamlit
+def keyboard_listener():
+    components.html(
+        """
+        <script>
+        const doc = window.parent.document;
+        doc.addEventListener('keydown', function(e) {
+            const key = e.key.toLowerCase();
+            // Erstelle ein unsichtbares Element oder nutze ein bestehendes, um Daten zu senden
+            window.parent.postMessage({
+                type: 'streamlit:setComponentValue',
+                value: key,
+                key: 'last_key'
+            }, '*');
+        });
+        </script>
+        """,
+        height=0,
+    )
 
-# Ein kleiner Workaround: Wir nutzen ein Text-Input, das durch JS gefüllt wird
-# Aber für die Einfachheit nutzen wir hier die direkte Steuerung via Buttons + State
-# In einer echten Streamlit Game Engine würde man "streamlit-gamepad" o.ä. nutzen.
-
-## SPIEL-LOGIK FUNKTIONEN
-def move_player(player, direction):
-    step = 5
-    if player == 1:
-        pos = st.session_state.p1_pos
-    else:
-        pos = st.session_state.p2_pos
-        
-    if direction == 'w' or direction == 'i': pos[1] = max(0, pos[1] - step)
-    if direction == 's' or direction == 'k': pos[1] = min(100, pos[1] + step)
-    if direction == 'a' or direction == 'j': pos[0] = max(0, pos[0] - step)
-    if direction == 'd' or direction == 'l': pos[0] = min(100, pos[0] + step)
-
-def check_collision():
-    p1 = st.session_state.p1_pos
-    p2 = st.session_state.p2_pos
-    dist = ((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)**0.5
-    if dist < 8: # Kollisionsradius
-        return True
-    return False
-
-# --- UI LAYOUT ---
-st.title("⚡ Streamlit React Battle ⚡")
-cols = st.columns(2)
-cols[0].metric("Spieler 1 (WASD + E)", st.session_state.p1_score)
-cols[1].metric("Spieler 2 (IJKL + O)", st.session_state.p2_score)
-
-# Spielfeld Visualisierung (CSS-basiert)
-game_field = st.empty()
-
-def draw_game():
-    p1 = st.session_state.p1_pos
-    p2 = st.session_state.p2_pos
-    html_code = f"""
-    <div style="position: relative; width: 100%; height: 400px; background-color: #1e1e1e; border-radius: 10px; border: 2px solid #444;">
-        <div style="position: absolute; left: {p1[0]}%; top: {p1[1]}%; width: 30px; height: 30px; background: #FF4B4B; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 15px #FF4B4B;"></div>
-        <div style="position: absolute; left: {p2[0]}%; top: {p2[1]}%; width: 30px; height: 30px; background: #0068C9; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 15px #0068C9;"></div>
-    </div>
-    """
-    game_field.markdown(html_code, unsafe_allow_html=True)
-
-draw_game()
-
-# --- INPUT HANDLING ---
-# Da Streamlit auf Events wartet, nutzen wir hier ein Eingabefeld für die Demo-Steuerung
-# Für echtes "Simultan-Gaming" müsste man auf eine Custom Component wie 'streamlit-keyboard-event' setzen.
-cmd = st.chat_input("Drücke Tasten hier (Fokus-Hack) oder nutze Buttons:")
-
-if cmd:
-    cmd = cmd.lower()
-    # P1 Controls
-    if cmd in ['w', 'a', 's', 'd']: move_player(1, cmd)
-    if cmd == 'e': 
-        st.session_state.p1_pos[0] += 20 # Teleport Dash
-        st.toast("P1 Dash!")
-        
-    # P2 Controls
-    if cmd in ['i', 'j', 'k', 'l']: move_player(2, cmd)
-    if cmd == 'o': 
-        st.session_state.p2_pos[0] -= 20 # Teleport Dash
-        st.toast("P2 Dash!")
-
-    if check_collision():
-        st.session_state.p1_score += 1
-        st.balloons()
-        st.session_state.p1_pos = [20, 50]
-        st.session_state.p2_pos = [80, 50]
+# --- SPIELLOGIK ---
+def update_game(key):
+    step = 20
+    dash_distance = 60
     
-    st.rerun()
+    # Spieler 1 (WASD + E)
+    if key == 'w': st.session_state.p1_pos[1] -= step
+    if key == 's': st.session_state.p1_pos[1] += step
+    if key == 'a': st.session_state.p1_pos[0] -= step
+    if key == 'd': st.session_state.p1_pos[0] += step
+    if key == 'e' and st.session_state.p1_cd <= 0:
+        st.session_state.p1_pos[0] += dash_distance
+        st.session_state.p1_cd = 5 # 5 Aktionen Cooldown
 
-st.info("💡 **Tipp:** Da Streamlit kein klassisches Game-Engine-Looping hat, klicke in das Chat-Feld unten und gib die Taste ein. Für echtes 'Simultan-Feeling' am selben Gerät ist das Web-Interface von Streamlit ohne Custom Components limitiert.")
+    # Spieler 2 (IJKL + O)
+    if key == 'i': st.session_state.p2_pos[1] -= step
+    if key == 'k': st.session_state.p2_pos[1] += step
+    if key == 'j': st.session_state.p2_pos[0] -= step
+    if key == 'l': st.session_state.p2_pos[0] += step
+    if key == 'o' and st.session_state.p2_cd <= 0:
+        st.session_state.p2_pos[0] -= dash_distance
+        st.session_state.p2_cd = 5
+
+    # Cooldowns verringern
+    if st.session_state.p1_cd > 0: st.session_state.p1_cd -= 1
+    if st.session_state.p2_cd > 0: st.session_state.p2_cd -= 1
+
+    # Kollisionsprüfung mit dem Orb (vereinfacht)
+    for p in ['p1', 'p2']:
+        pos = st.session_state[f'{p}_pos']
+        orb = st.session_state.orb_pos
+        if abs(pos[0] - orb[0]) < 30 and abs(pos[1] - orb[1]) < 30:
+            st.session_state[f'{p}_score'] += 1
+            # Orb an neue Position setzen
+            import random
+            st.session_state.orb_pos = [random.randint(50, 550), random.randint(50, 350)]
+
+# --- UI RENDERING ---
+st.title("🕹️ 1-vs-1 Reaction Battle")
+st.write("Sammle den gelben Orb! **P1:** WASD + E | **P2:** IJKL + O")
+
+# Spielbereich zeichnen (SVG für einfache Grafik)
+p1 = st.session_state.p1_pos
+p2 = st.session_state.p2_pos
+orb = st.session_state.orb_pos
+
+game_board = f"""
+<svg width="600" height="400" style="background-color: #1e1e1e; border: 2px solid #333; border-radius: 10px;">
+    <rect x="{p1[0]}" y="{p1[1]}" width="30" height="30" fill="#00f2ff" />
+    <text x="{p1[0]}" y="{p1[1]-5}" fill="white" font-size="12">P1</text>
+    
+    <rect x="{p2[0]}" y="{p2[1]}" width="30" height="30" fill="#ff007b" />
+    <text x="{p2[0]}" y="{p2[1]-5}" fill="white" font-size="12">P2</text>
+    
+    <circle cx="{orb[0]}" cy="{orb[1]}" r="10" fill="#f9d423" />
+</svg>
+"""
+st.markdown(game_board, unsafe_allow_html=True)
+
+# Punktestand
+cols = st.columns(2)
+cols[0].metric("P1 Score", st.session_state.p1_score, f"CD: {st.session_state.p1_cd}")
+cols[1].metric("P2 Score", st.session_state.p2_score, f"CD: {st.session_state.p2_cd}")
+
+# Keyboard Input verarbeiten
+keyboard_listener()
+
+# Trick: Ein verstecktes Input-Element, das den Wert von JS empfängt
+# Wir nutzen hier eine kleine Verzögerung, um die CPU nicht zu grillen
+last_key = st.chat_input("Steuerung aktiv...", key="input_trigger")
+
+# Da wir oben JavaScript nutzen, um Nachrichten zu senden, 
+# müssen wir diese in Streamlit abfangen. Ein einfacherer Weg für dieses Tutorial:
+# Wir prüfen, ob sich ein State-Key geändert hat.
+if "last_key" in st.query_params:
+    key = st.query_params["last_key"]
+    update_game(key)
+    # Reset (in einer echten App würde man dies über ein Custom Component lösen)
+    
+# Button zum Neustart
+if st.button("Spiel zurücksetzen"):
+    for key in st.session_state.keys():
+        del st.session_state[key]
+    st.rerun()
