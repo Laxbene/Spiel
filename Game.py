@@ -1,118 +1,145 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import time
-from streamlit.components.v1 import html
+import random
 
 # --- KONFIGURATION ---
-st.set_page_config(page_title="1vs1 Reaction Battle", layout="centered")
+ST_FPS = 30  # Bilder pro Sekunde
+GAME_WIDTH = 600
+GAME_HEIGHT = 400
+PLAYER_SIZE = 20
+MOVE_SPEED = 10
 
-# Initialisierung des Spielzustands
-if "p1_pos" not in st.session_state:
-    st.session_state.update({
-        "p1_pos": [2, 2],
-        "p2_pos": [7, 7],
-        "p1_score": 0,
-        "p2_score": 0,
-        "p1_cd": 0, # Cooldown Spieler 1
-        "p2_cd": 0, # Cooldown Spieler 2
-        "game_over": False,
-        "last_msg": "Drücke eine Taste zum Starten!"
-    })
+# --- SEITEN-SETUP ---
+st.set_page_config(page_title="1-vs-1 Reaction Arena", layout="centered")
+st.title("⚡ 1-vs-1 Reaction Arena")
+st.write("Spieler 1: WASD + E | Spieler 2: IJKL + O")
 
-# --- JAVASCRIPT FÜR TASTATURSTEUERUNG ---
-# Dieses Skript sendet Tastendrücke zurück an Streamlit
+# --- JAVASCRIPT FÜR TASTATUR-STEUERUNG ---
+# Dieses Skript fängt Tastendrücke ab und sendet sie an Streamlit zurück
 keystroke_js = """
 <script>
-const doc = window.parent.document;
-doc.addEventListener('keydown', function(e) {
-    const key = e.key.toLowerCase();
-    // Wir senden den Tastendruck als Query-Parameter oder über ein verstecktes Element
-    // Einfachste Methode für Streamlit: Ein Event-Trigger
-    const streamlitDoc = window.parent.document.querySelector('.stApp');
-    if (["w","a","s","d","e","i","j","k","l","o"].includes(key)) {
+    const pressedKeys = new Set();
+    document.addEventListener('keydown', (e) => {
+        pressedKeys.add(e.key.toLowerCase());
+        sendToStreamlit();
+    });
+    document.addEventListener('keyup', (e) => {
+        pressedKeys.delete(e.key.toLowerCase());
+        sendToStreamlit();
+    });
+
+    function sendToStreamlit() {
+        const keyArray = Array.from(pressedKeys);
         window.parent.postMessage({
-            type: 'streamlit:set_component_value',
-            value: key,
-            key: 'keyboard_input'
+            type: 'streamlit:setComponentValue',
+            value: keyArray
         }, '*');
     }
-});
 </script>
 """
 
-# Komponente einbinden (unsichtbar)
-st.components.v1.html(keystroke_js, height=0)
+# Komponente zum Empfangen der Tasten (unsichtbar)
+def key_receiver():
+    return components.html(keystroke_js, height=0, width=0)
 
-# --- SPIELLOGIK ---
-def handle_input(key):
-    if st.session_state.game_over:
-        return
+# --- SPIELZUSTAND INITIALISIEREN ---
+if 'game_state' not in st.session_state:
+    st.session_state.game_state = {
+        'p1': {'x': 100, 'y': 200, 'score': 0, 'cd': 0},
+        'p2': {'x': 500, 'y': 200, 'score': 0, 'cd': 0},
+        'target': {'x': 300, 'y': 200},
+        'active': True,
+        'timer': 30.0
+    }
 
-    # Spieler 1 (WASD + E)
-    if key == 'w': st.session_state.p1_pos[1] = max(0, st.session_state.p1_pos[1]-1)
-    if key == 's': st.session_state.p1_pos[1] = min(9, st.session_state.p1_pos[1]+1)
-    if key == 'a': st.session_state.p1_pos[0] = max(0, st.session_state.p1_pos[0]-1)
-    if key == 'd': st.session_state.p1_pos[0] = min(9, st.session_state.p1_pos[0]+1)
-    
-    # Spezialfähigkeit P1 (Teleport zufällig, wenn CD 0)
-    if key == 'e' and st.session_state.p1_cd <= 0:
-        st.session_state.p1_pos = [st.session_state.p1_pos[0], (st.session_state.p1_pos[1]+3)%10]
-        st.session_state.p1_cd = 5
-        st.session_state.last_msg = "P1 nutzt TELEPORT!"
+gs = st.session_state.game_state
 
-    # Spieler 2 (IJKL + O)
-    if key == 'i': st.session_state.p2_pos[1] = max(0, st.session_state.p2_pos[1]-1)
-    if key == 'k': st.session_state.p2_pos[1] = min(9, st.session_state.p2_pos[1]+1)
-    if key == 'j': st.session_state.p2_pos[0] = max(0, st.session_state.p2_pos[0]-1)
-    if key == 'l': st.session_state.p2_pos[0] = min(9, st.session_state.p2_pos[0]+1)
+# --- LOGIK-FUNKTIONEN ---
+def update_game(keys):
+    if not gs['active']: return
 
-    # Spezialfähigkeit P2 (Dash, wenn CD 0)
-    if key == 'o' and st.session_state.p2_cd <= 0:
-        st.session_state.p2_pos[0] = (st.session_state.p2_pos[0]-3)%10
-        st.session_state.p2_cd = 5
-        st.session_state.last_msg = "P2 nutzt DASH!"
+    # Steuerung Spieler 1 (WASD)
+    if 'w' in keys and gs['p1']['y'] > 0: gs['p1']['y'] -= MOVE_SPEED
+    if 's' in keys and gs['p1']['y'] < GAME_HEIGHT - PLAYER_SIZE: gs['p1']['y'] += MOVE_SPEED
+    if 'a' in keys and gs['p1']['x'] > 0: gs['p1']['x'] -= MOVE_SPEED
+    if 'd' in keys and gs['p1']['x'] < GAME_WIDTH - PLAYER_SIZE: gs['p1']['x'] += MOVE_SPEED
 
-    # Kollisionsprüfung (Wer auf dem Feld des anderen landet, punktet)
-    if st.session_state.p1_pos == st.session_state.p2_pos:
-        st.session_state.p1_score += 1
-        st.session_state.p1_pos = [0,0]
-        st.session_state.p2_pos = [9,9]
-        st.session_state.last_msg = "PUNKT FÜR SPIELER 1!"
+    # Steuerung Spieler 2 (IJKL)
+    if 'i' in keys and gs['p2']['y'] > 0: gs['p2']['y'] -= MOVE_SPEED
+    if 'k' in keys and gs['p2']['y'] < GAME_HEIGHT - PLAYER_SIZE: gs['p2']['y'] += MOVE_SPEED
+    if 'j' in keys and gs['p2']['x'] > 0: gs['p2']['x'] -= MOVE_SPEED
+    if 'l' in keys and gs['p2']['x'] < GAME_WIDTH - PLAYER_SIZE: gs['p2']['x'] += MOVE_SPEED
 
-    # Cooldowns reduzieren
-    st.session_state.p1_cd = max(0, st.session_state.p1_cd - 0.5)
-    st.session_state.p2_cd = max(0, st.session_state.p2_cd - 0.5)
+    # Spezialfähigkeiten (Teleport zum Ziel bei E / O)
+    for p_key, skill_key in [('p1', 'e'), ('p2', 'o')]:
+        if skill_key in keys and gs[p_key]['cd'] <= 0:
+            gs[p_key]['x'] = gs['target']['x'] + (random.randint(-20, 20))
+            gs[p_key]['y'] = gs['target']['y'] + (random.randint(-20, 20))
+            gs[p_key]['cd'] = 50 # Cooldown Frames
 
-# --- UI ANZEIGE ---
-st.title("⚡ Reaction Battle 1-vs-1")
+    # Cooldowns verringern
+    if gs['p1']['cd'] > 0: gs['p1']['cd'] -= 1
+    if gs['p2']['cd'] > 0: gs['p2']['cd'] -= 1
 
-col1, col2 = st.columns(2)
-col1.metric("Spieler 1 (WASD)", f"{st.session_state.p1_score} Pkt", f"CD: {st.session_state.p1_cd}")
-col2.metric("Spieler 2 (IJKL)", f"{st.session_state.p2_score} Pkt", f"CD: {st.session_state.p2_cd}")
+    # Kollision mit Ziel (Punktesammeln)
+    for p in ['p1', 'p2']:
+        if abs(gs[p]['x'] - gs['target']['x']) < 20 and abs(gs[p]['y'] - gs['target']['y']) < 20:
+            gs[p]['score'] += 1
+            gs['target']['x'] = random.randint(50, GAME_WIDTH - 50)
+            gs['target']['y'] = random.randint(50, GAME_HEIGHT - 50)
 
-# Spielfeld zeichnen (10x10 Grid)
-grid = [["⬜" for _ in range(10)] for _ in range(10)]
-grid[st.session_state.p1_pos[1]][st.session_state.p1_pos[0]] = "🟦" # P1
-grid[st.session_state.p2_pos[1]][st.session_state.p2_pos[0]] = "🟥" # P2
+# --- UI RENDERING ---
+active_keys = key_receiver() 
+# Hinweis: In einer echten App würde man hier eine stabilere Custom Component nutzen.
+# Für diesen Prototyp nutzen wir einen Workaround mit Session State.
 
-display_grid = "\n".join([" ".join(row) for row in grid])
-st.code(display_grid, language="text")
+visuals = st.empty()
 
-st.info(st.session_state.last_msg)
+# --- GAME LOOP ---
+def run_loop():
+    start_time = time.time()
+    while gs['active']:
+        # Zeit berechnen
+        elapsed = time.time() - start_time
+        gs['timer'] = max(0, 30 - elapsed)
+        
+        if gs['timer'] <= 0:
+            gs['active'] = False
+        
+        # Hier müssten normalerweise die Tasten verarbeitet werden. 
+        # Da Streamlit bei jedem Key-Event das Skript neu ausführt,
+        # nutzen wir das aus:
+        update_game(st.session_state.get('keys', []))
+        
+        # Zeichne das Spielfeld als SVG (einfach und schnell)
+        svg_ui = f"""
+        <svg width="{GAME_WIDTH}" height="{GAME_HEIGHT}" style="background-color: #1e1e1e; border: 2px solid #555;">
+            <circle cx="{gs['target']['x']}" cy="{gs['target']['y']}" r="10" fill="yellow" />
+            <rect x="{gs['p1']['x']}" y="{gs['p1']['y']}" width="{PLAYER_SIZE}" height="{PLAYER_SIZE}" fill="#FF4B4B" />
+            <text x="{gs['p1']['x']}" y="{gs['p1']['y']-5}" fill="white" font-size="12">P1 (CD: {gs['p1']['cd']})</text>
+            <rect x="{gs['p2']['x']}" y="{gs['p2']['y']}" width="{PLAYER_SIZE}" height="{PLAYER_SIZE}" fill="#0068C9" />
+            <text x="{gs['p2']['x']}" y="{gs['p2']['y']-5}" fill="white" font-size="12">P2 (CD: {gs['p2']['cd']})</text>
+        </svg>
+        """
+        
+        with visuals.container():
+            cols = st.columns(3)
+            cols[0].metric("Spieler 1", gs['p1']['score'])
+            cols[1].metric("Zeit", round(gs['timer'], 1))
+            cols[2].metric("Spieler 2", gs['p2']['score'])
+            st.write(svg_ui, unsafe_allow_html=True)
+            
+        time.sleep(1/ST_FPS)
+        if not gs['active']:
+            winner = "Spieler 1" if gs['p1']['score'] > gs['p2']['score'] else "Spieler 2"
+            if gs['p1']['score'] == gs['p2']['score']: winner = "Unentschieden"
+            st.balloons()
+            st.header(f"🏆 Gewinner: {winner}!")
+            if st.button("Neustart"):
+                del st.session_state.game_state
+                st.rerun()
+            break
 
-# Reset Button
-if st.button("Spiel zurücksetzen"):
-    for key in st.session_state.keys():
-        del st.session_state[key]
-    st.rerun()
-
-# Trigger für die Eingabeverarbeitung (Hack um JS-Werte zu fangen)
-# In einer echten App würde man hier st_js_blocking nutzen oder ähnliches
-query_params = st.query_params
-# Da Streamlit Components asynchron sind, nutzen wir hier einen kleinen Trick:
-# Wir prüfen, ob eine Eingabe über ein (unsichtbares) Input-Feld reinkommt.
-# Für dieses Beispiel nutzen wir ein einfaches Text-Input als Fokus-Fänger.
-key_input = st.text_input("Klicke hier, damit Tastatureingaben erkannt werden:", key="manual_input")
-if key_input:
-    handle_input(key_input[-1].lower())
-    # Input leeren für nächsten Zug
-    # (In einer High-End-Lösung würde man custom_components nutzen)
+# Start des Loops
+run_loop()
