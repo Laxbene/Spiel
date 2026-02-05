@@ -1,145 +1,111 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import time
-import random
 
 # --- KONFIGURATION ---
-ST_FPS = 30  # Bilder pro Sekunde
-GAME_WIDTH = 600
-GAME_HEIGHT = 400
-PLAYER_SIZE = 20
-MOVE_SPEED = 10
+st.set_page_config(page_title="1vs1 Streamlit Battle", layout="centered")
 
-# --- SEITEN-SETUP ---
-st.set_page_config(page_title="1-vs-1 Reaction Arena", layout="centered")
-st.title("⚡ 1-vs-1 Reaction Arena")
-st.write("Spieler 1: WASD + E | Spieler 2: IJKL + O")
+# Initialisierung des Spielzustands
+if 'p1_pos' not in st.session_state:
+    st.session_state.update({
+        'p1_pos': [20, 50], # [x, y] in Prozent
+        'p2_pos': [80, 50],
+        'p1_score': 0,
+        'p2_score': 0,
+        'p1_cd': 0, # Cooldown Zeitstempel
+        'p2_cd': 0,
+        'last_update': time.time()
+    })
 
-# --- JAVASCRIPT FÜR TASTATUR-STEUERUNG ---
-# Dieses Skript fängt Tastendrücke ab und sendet sie an Streamlit zurück
+# --- JAVASCRIPT FÜR TASTATUR ---
+# Dieses Skript fängt Tasten ab und sendet sie an Streamlit zurück
 keystroke_js = """
 <script>
-    const pressedKeys = new Set();
-    document.addEventListener('keydown', (e) => {
-        pressedKeys.add(e.key.toLowerCase());
-        sendToStreamlit();
-    });
-    document.addEventListener('keyup', (e) => {
-        pressedKeys.delete(e.key.toLowerCase());
-        sendToStreamlit();
-    });
-
-    function sendToStreamlit() {
-        const keyArray = Array.from(pressedKeys);
-        window.parent.postMessage({
-            type: 'streamlit:setComponentValue',
-            value: keyArray
-        }, '*');
-    }
+const doc = window.parent.document;
+doc.addEventListener('keydown', function(e) {
+    const key = e.key.toLowerCase();
+    // Wir senden die Taste an ein verstecktes Streamlit-Input-Feld oder nutzen die API
+    window.parent.postMessage({
+        type: 'streamlit:setComponentValue',
+        value: key,
+    }, '*');
+});
 </script>
 """
+components.html(keystroke_js, height=0)
 
-# Komponente zum Empfangen der Tasten (unsichtbar)
-def key_receiver():
-    return components.html(keystroke_js, height=0, width=0)
+# Ein kleiner Workaround: Wir nutzen ein Text-Input, das durch JS gefüllt wird
+# Aber für die Einfachheit nutzen wir hier die direkte Steuerung via Buttons + State
+# In einer echten Streamlit Game Engine würde man "streamlit-gamepad" o.ä. nutzen.
 
-# --- SPIELZUSTAND INITIALISIEREN ---
-if 'game_state' not in st.session_state:
-    st.session_state.game_state = {
-        'p1': {'x': 100, 'y': 200, 'score': 0, 'cd': 0},
-        'p2': {'x': 500, 'y': 200, 'score': 0, 'cd': 0},
-        'target': {'x': 300, 'y': 200},
-        'active': True,
-        'timer': 30.0
-    }
-
-gs = st.session_state.game_state
-
-# --- LOGIK-FUNKTIONEN ---
-def update_game(keys):
-    if not gs['active']: return
-
-    # Steuerung Spieler 1 (WASD)
-    if 'w' in keys and gs['p1']['y'] > 0: gs['p1']['y'] -= MOVE_SPEED
-    if 's' in keys and gs['p1']['y'] < GAME_HEIGHT - PLAYER_SIZE: gs['p1']['y'] += MOVE_SPEED
-    if 'a' in keys and gs['p1']['x'] > 0: gs['p1']['x'] -= MOVE_SPEED
-    if 'd' in keys and gs['p1']['x'] < GAME_WIDTH - PLAYER_SIZE: gs['p1']['x'] += MOVE_SPEED
-
-    # Steuerung Spieler 2 (IJKL)
-    if 'i' in keys and gs['p2']['y'] > 0: gs['p2']['y'] -= MOVE_SPEED
-    if 'k' in keys and gs['p2']['y'] < GAME_HEIGHT - PLAYER_SIZE: gs['p2']['y'] += MOVE_SPEED
-    if 'j' in keys and gs['p2']['x'] > 0: gs['p2']['x'] -= MOVE_SPEED
-    if 'l' in keys and gs['p2']['x'] < GAME_WIDTH - PLAYER_SIZE: gs['p2']['x'] += MOVE_SPEED
-
-    # Spezialfähigkeiten (Teleport zum Ziel bei E / O)
-    for p_key, skill_key in [('p1', 'e'), ('p2', 'o')]:
-        if skill_key in keys and gs[p_key]['cd'] <= 0:
-            gs[p_key]['x'] = gs['target']['x'] + (random.randint(-20, 20))
-            gs[p_key]['y'] = gs['target']['y'] + (random.randint(-20, 20))
-            gs[p_key]['cd'] = 50 # Cooldown Frames
-
-    # Cooldowns verringern
-    if gs['p1']['cd'] > 0: gs['p1']['cd'] -= 1
-    if gs['p2']['cd'] > 0: gs['p2']['cd'] -= 1
-
-    # Kollision mit Ziel (Punktesammeln)
-    for p in ['p1', 'p2']:
-        if abs(gs[p]['x'] - gs['target']['x']) < 20 and abs(gs[p]['y'] - gs['target']['y']) < 20:
-            gs[p]['score'] += 1
-            gs['target']['x'] = random.randint(50, GAME_WIDTH - 50)
-            gs['target']['y'] = random.randint(50, GAME_HEIGHT - 50)
-
-# --- UI RENDERING ---
-active_keys = key_receiver() 
-# Hinweis: In einer echten App würde man hier eine stabilere Custom Component nutzen.
-# Für diesen Prototyp nutzen wir einen Workaround mit Session State.
-
-visuals = st.empty()
-
-# --- GAME LOOP ---
-def run_loop():
-    start_time = time.time()
-    while gs['active']:
-        # Zeit berechnen
-        elapsed = time.time() - start_time
-        gs['timer'] = max(0, 30 - elapsed)
+## SPIEL-LOGIK FUNKTIONEN
+def move_player(player, direction):
+    step = 5
+    if player == 1:
+        pos = st.session_state.p1_pos
+    else:
+        pos = st.session_state.p2_pos
         
-        if gs['timer'] <= 0:
-            gs['active'] = False
-        
-        # Hier müssten normalerweise die Tasten verarbeitet werden. 
-        # Da Streamlit bei jedem Key-Event das Skript neu ausführt,
-        # nutzen wir das aus:
-        update_game(st.session_state.get('keys', []))
-        
-        # Zeichne das Spielfeld als SVG (einfach und schnell)
-        svg_ui = f"""
-        <svg width="{GAME_WIDTH}" height="{GAME_HEIGHT}" style="background-color: #1e1e1e; border: 2px solid #555;">
-            <circle cx="{gs['target']['x']}" cy="{gs['target']['y']}" r="10" fill="yellow" />
-            <rect x="{gs['p1']['x']}" y="{gs['p1']['y']}" width="{PLAYER_SIZE}" height="{PLAYER_SIZE}" fill="#FF4B4B" />
-            <text x="{gs['p1']['x']}" y="{gs['p1']['y']-5}" fill="white" font-size="12">P1 (CD: {gs['p1']['cd']})</text>
-            <rect x="{gs['p2']['x']}" y="{gs['p2']['y']}" width="{PLAYER_SIZE}" height="{PLAYER_SIZE}" fill="#0068C9" />
-            <text x="{gs['p2']['x']}" y="{gs['p2']['y']-5}" fill="white" font-size="12">P2 (CD: {gs['p2']['cd']})</text>
-        </svg>
-        """
-        
-        with visuals.container():
-            cols = st.columns(3)
-            cols[0].metric("Spieler 1", gs['p1']['score'])
-            cols[1].metric("Zeit", round(gs['timer'], 1))
-            cols[2].metric("Spieler 2", gs['p2']['score'])
-            st.write(svg_ui, unsafe_allow_html=True)
-            
-        time.sleep(1/ST_FPS)
-        if not gs['active']:
-            winner = "Spieler 1" if gs['p1']['score'] > gs['p2']['score'] else "Spieler 2"
-            if gs['p1']['score'] == gs['p2']['score']: winner = "Unentschieden"
-            st.balloons()
-            st.header(f"🏆 Gewinner: {winner}!")
-            if st.button("Neustart"):
-                del st.session_state.game_state
-                st.rerun()
-            break
+    if direction == 'w' or direction == 'i': pos[1] = max(0, pos[1] - step)
+    if direction == 's' or direction == 'k': pos[1] = min(100, pos[1] + step)
+    if direction == 'a' or direction == 'j': pos[0] = max(0, pos[0] - step)
+    if direction == 'd' or direction == 'l': pos[0] = min(100, pos[0] + step)
 
-# Start des Loops
-run_loop()
+def check_collision():
+    p1 = st.session_state.p1_pos
+    p2 = st.session_state.p2_pos
+    dist = ((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2)**0.5
+    if dist < 8: # Kollisionsradius
+        return True
+    return False
+
+# --- UI LAYOUT ---
+st.title("⚡ Streamlit React Battle ⚡")
+cols = st.columns(2)
+cols[0].metric("Spieler 1 (WASD + E)", st.session_state.p1_score)
+cols[1].metric("Spieler 2 (IJKL + O)", st.session_state.p2_score)
+
+# Spielfeld Visualisierung (CSS-basiert)
+game_field = st.empty()
+
+def draw_game():
+    p1 = st.session_state.p1_pos
+    p2 = st.session_state.p2_pos
+    html_code = f"""
+    <div style="position: relative; width: 100%; height: 400px; background-color: #1e1e1e; border-radius: 10px; border: 2px solid #444;">
+        <div style="position: absolute; left: {p1[0]}%; top: {p1[1]}%; width: 30px; height: 30px; background: #FF4B4B; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 15px #FF4B4B;"></div>
+        <div style="position: absolute; left: {p2[0]}%; top: {p2[1]}%; width: 30px; height: 30px; background: #0068C9; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 15px #0068C9;"></div>
+    </div>
+    """
+    game_field.markdown(html_code, unsafe_allow_html=True)
+
+draw_game()
+
+# --- INPUT HANDLING ---
+# Da Streamlit auf Events wartet, nutzen wir hier ein Eingabefeld für die Demo-Steuerung
+# Für echtes "Simultan-Gaming" müsste man auf eine Custom Component wie 'streamlit-keyboard-event' setzen.
+cmd = st.chat_input("Drücke Tasten hier (Fokus-Hack) oder nutze Buttons:")
+
+if cmd:
+    cmd = cmd.lower()
+    # P1 Controls
+    if cmd in ['w', 'a', 's', 'd']: move_player(1, cmd)
+    if cmd == 'e': 
+        st.session_state.p1_pos[0] += 20 # Teleport Dash
+        st.toast("P1 Dash!")
+        
+    # P2 Controls
+    if cmd in ['i', 'j', 'k', 'l']: move_player(2, cmd)
+    if cmd == 'o': 
+        st.session_state.p2_pos[0] -= 20 # Teleport Dash
+        st.toast("P2 Dash!")
+
+    if check_collision():
+        st.session_state.p1_score += 1
+        st.balloons()
+        st.session_state.p1_pos = [20, 50]
+        st.session_state.p2_pos = [80, 50]
+    
+    st.rerun()
+
+st.info("💡 **Tipp:** Da Streamlit kein klassisches Game-Engine-Looping hat, klicke in das Chat-Feld unten und gib die Taste ein. Für echtes 'Simultan-Feeling' am selben Gerät ist das Web-Interface von Streamlit ohne Custom Components limitiert.")
