@@ -1,127 +1,118 @@
 import streamlit as st
-import streamlit.components.v1 as components
+import time
+from streamlit.components.v1 import html
 
-st.set_page_config(page_title="1vs1 Neon Reaction", layout="centered")
+# --- KONFIGURATION ---
+st.set_page_config(page_title="1vs1 Reaction Battle", layout="centered")
 
-def main():
-    st.title("⚡ 1-vs-1 Neon Reaction")
-    st.write("Spieler 1: **WASD + E** | Spieler 2: **Pfeiltasten + '-'**")
+# Initialisierung des Spielzustands
+if "p1_pos" not in st.session_state:
+    st.session_state.update({
+        "p1_pos": [2, 2],
+        "p2_pos": [7, 7],
+        "p1_score": 0,
+        "p2_score": 0,
+        "p1_cd": 0, # Cooldown Spieler 1
+        "p2_cd": 0, # Cooldown Spieler 2
+        "game_over": False,
+        "last_msg": "Drücke eine Taste zum Starten!"
+    })
 
-    # Das Spiel wird in einem IFrame via HTML/JS ausgeführt
-    game_html = """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            canvas { background: #111; border: 2px solid #555; display: block; margin: 0 auto; }
-            .stats { color: white; font-family: sans-serif; display: flex; justify-content: space-around; }
-        </style>
-    </head>
-    <body>
-        <div class="stats">
-            <p>Spieler 1 (Blau): <span id="s1">0</span> | Dash: <span id="c1">Bereit</span></p>
-            <p>Spieler 2 (Rot): <span id="s2">0</span> | Dash: <span id="c2">Bereit</span></p>
-        </div>
-        <canvas id="gameCanvas" width="600" height="400"></canvas>
+# --- JAVASCRIPT FÜR TASTATURSTEUERUNG ---
+# Dieses Skript sendet Tastendrücke zurück an Streamlit
+keystroke_js = """
+<script>
+const doc = window.parent.document;
+doc.addEventListener('keydown', function(e) {
+    const key = e.key.toLowerCase();
+    // Wir senden den Tastendruck als Query-Parameter oder über ein verstecktes Element
+    // Einfachste Methode für Streamlit: Ein Event-Trigger
+    const streamlitDoc = window.parent.document.querySelector('.stApp');
+    if (["w","a","s","d","e","i","j","k","l","o"].includes(key)) {
+        window.parent.postMessage({
+            type: 'streamlit:set_component_value',
+            value: key,
+            key: 'keyboard_input'
+        }, '*');
+    }
+});
+</script>
+"""
 
-        <script>
-            const canvas = document.getElementById("gameCanvas");
-            const ctx = canvas.getContext("2d");
+# Komponente einbinden (unsichtbar)
+st.components.v1.html(keystroke_js, height=0)
 
-            // Spielzustand
-            let p1 = { x: 50, y: 200, score: 0, color: '#00f', speed: 4, dashCd: 0 };
-            let p2 = { x: 550, y: 200, score: 0, color: '#f00', speed: 4, dashCd: 0 };
-            let goal = { x: 300, y: 200, size: 10 };
-            
-            const keys = {};
-            window.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
-            window.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+# --- SPIELLOGIK ---
+def handle_input(key):
+    if st.session_state.game_over:
+        return
 
-            function update() {
-                // Spieler 1 Bewegung (WASD)
-                if (keys['w'] && p1.y > 0) p1.y -= p1.speed;
-                if (keys['s'] && p1.y < canvas.height) p1.y += p1.speed;
-                if (keys['a'] && p1.x > 0) p1.x -= p1.speed;
-                if (keys['d'] && p1.x < canvas.width) p1.x += p1.speed;
-                
-                // Spieler 1 Spezial (E) - Dash
-                if (keys['e'] && p1.dashCd <= 0) {
-                    p1.speed = 12;
-                    p1.dashCd = 100; // Cooldown Frames
-                    setTimeout(() => p1.speed = 4, 200);
-                }
-
-                // Spieler 2 Bewegung (Pfeiltasten)
-                if (keys['arrowup'] && p2.y > 0) p2.y -= p2.speed;
-                if (keys['arrowdown'] && p2.y < canvas.height) p2.y += p2.speed;
-                if (keys['arrowleft'] && p2.x > 0) p2.x -= p2.speed;
-                if (keys['arrowright'] && p2.x < canvas.width) p2.x += p2.speed;
-
-                // Spieler 2 Spezial (-) - Dash
-                if (keys['-'] && p2.dashCd <= 0) {
-                    p2.speed = 12;
-                    p2.dashCd = 100;
-                    setTimeout(() => p2.speed = 4, 200);
-                }
-
-                // Cooldowns reduzieren
-                if (p1.dashCd > 0) p1.dashCd--;
-                if (p2.dashCd > 0) p2.dashCd--;
-
-                // Kollision mit dem Ziel
-                checkGoal(p1, "s1");
-                checkGoal(p2, "s2");
-
-                draw();
-                requestAnimationFrame(update);
-            }
-
-            function checkGoal(p, spanId) {
-                let dx = p.x - goal.x;
-                let dy = p.y - goal.y;
-                let distance = Math.sqrt(dx * dx + dy * dy);
-                if (distance < 20) {
-                    p.score++;
-                    document.getElementById(spanId).innerText = p.score;
-                    goal.x = Math.random() * (canvas.width - 40) + 20;
-                    goal.y = Math.random() * (canvas.height - 40) + 20;
-                }
-            }
-
-            function draw() {
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                // Ziel zeichnen
-                ctx.fillStyle = "yellow";
-                ctx.beginPath();
-                ctx.arc(goal.x, goal.y, goal.size, 0, Math.PI*2);
-                ctx.fill();
-
-                // Spieler zeichnen
-                ctx.fillStyle = p1.color;
-                ctx.fillRect(p1.x-10, p1.y-10, 20, 20);
-                ctx.fillStyle = p2.color;
-                ctx.fillRect(p2.x-10, p2.y-10, 20, 20);
-
-                // UI Update Cooldowns
-                document.getElementById("c1").innerText = p1.dashCd <= 0 ? "Bereit" : "Warten...";
-                document.getElementById("c2").innerText = p2.dashCd <= 0 ? "Bereit" : "Warten...";
-            }
-
-            update();
-        </script>
-    </body>
-    </html>
-    """
+    # Spieler 1 (WASD + E)
+    if key == 'w': st.session_state.p1_pos[1] = max(0, st.session_state.p1_pos[1]-1)
+    if key == 's': st.session_state.p1_pos[1] = min(9, st.session_state.p1_pos[1]+1)
+    if key == 'a': st.session_state.p1_pos[0] = max(0, st.session_state.p1_pos[0]-1)
+    if key == 'd': st.session_state.p1_pos[0] = min(9, st.session_state.p1_pos[0]+1)
     
-    components.html(game_html, height=500)
+    # Spezialfähigkeit P1 (Teleport zufällig, wenn CD 0)
+    if key == 'e' and st.session_state.p1_cd <= 0:
+        st.session_state.p1_pos = [st.session_state.p1_pos[0], (st.session_state.p1_pos[1]+3)%10]
+        st.session_state.p1_cd = 5
+        st.session_state.last_msg = "P1 nutzt TELEPORT!"
 
-    st.info("""
-    **Spielregeln:**
-    - Wer zuerst 10 Punkte hat, gewinnt!
-    - Die Spezialfähigkeit macht dich für einen Moment extrem schnell.
-    - Achtung: Wenn du aus dem IFrame klickst, musst du wieder hineinklicken, damit die Tastatur reagiert.
-    """)
+    # Spieler 2 (IJKL + O)
+    if key == 'i': st.session_state.p2_pos[1] = max(0, st.session_state.p2_pos[1]-1)
+    if key == 'k': st.session_state.p2_pos[1] = min(9, st.session_state.p2_pos[1]+1)
+    if key == 'j': st.session_state.p2_pos[0] = max(0, st.session_state.p2_pos[0]-1)
+    if key == 'l': st.session_state.p2_pos[0] = min(9, st.session_state.p2_pos[0]+1)
 
-if __name__ == "__main__":
-    main()
+    # Spezialfähigkeit P2 (Dash, wenn CD 0)
+    if key == 'o' and st.session_state.p2_cd <= 0:
+        st.session_state.p2_pos[0] = (st.session_state.p2_pos[0]-3)%10
+        st.session_state.p2_cd = 5
+        st.session_state.last_msg = "P2 nutzt DASH!"
+
+    # Kollisionsprüfung (Wer auf dem Feld des anderen landet, punktet)
+    if st.session_state.p1_pos == st.session_state.p2_pos:
+        st.session_state.p1_score += 1
+        st.session_state.p1_pos = [0,0]
+        st.session_state.p2_pos = [9,9]
+        st.session_state.last_msg = "PUNKT FÜR SPIELER 1!"
+
+    # Cooldowns reduzieren
+    st.session_state.p1_cd = max(0, st.session_state.p1_cd - 0.5)
+    st.session_state.p2_cd = max(0, st.session_state.p2_cd - 0.5)
+
+# --- UI ANZEIGE ---
+st.title("⚡ Reaction Battle 1-vs-1")
+
+col1, col2 = st.columns(2)
+col1.metric("Spieler 1 (WASD)", f"{st.session_state.p1_score} Pkt", f"CD: {st.session_state.p1_cd}")
+col2.metric("Spieler 2 (IJKL)", f"{st.session_state.p2_score} Pkt", f"CD: {st.session_state.p2_cd}")
+
+# Spielfeld zeichnen (10x10 Grid)
+grid = [["⬜" for _ in range(10)] for _ in range(10)]
+grid[st.session_state.p1_pos[1]][st.session_state.p1_pos[0]] = "🟦" # P1
+grid[st.session_state.p2_pos[1]][st.session_state.p2_pos[0]] = "🟥" # P2
+
+display_grid = "\n".join([" ".join(row) for row in grid])
+st.code(display_grid, language="text")
+
+st.info(st.session_state.last_msg)
+
+# Reset Button
+if st.button("Spiel zurücksetzen"):
+    for key in st.session_state.keys():
+        del st.session_state[key]
+    st.rerun()
+
+# Trigger für die Eingabeverarbeitung (Hack um JS-Werte zu fangen)
+# In einer echten App würde man hier st_js_blocking nutzen oder ähnliches
+query_params = st.query_params
+# Da Streamlit Components asynchron sind, nutzen wir hier einen kleinen Trick:
+# Wir prüfen, ob eine Eingabe über ein (unsichtbares) Input-Feld reinkommt.
+# Für dieses Beispiel nutzen wir ein einfaches Text-Input als Fokus-Fänger.
+key_input = st.text_input("Klicke hier, damit Tastatureingaben erkannt werden:", key="manual_input")
+if key_input:
+    handle_input(key_input[-1].lower())
+    # Input leeren für nächsten Zug
+    # (In einer High-End-Lösung würde man custom_components nutzen)
