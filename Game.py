@@ -1,61 +1,67 @@
 import streamlit as st
-import random
+import time
 
-# Konfiguration der Seite
-st.set_page_config(page_title="Streamlit WASD Game", layout="centered")
+# Seite konfigurieren
+st.set_page_config(page_title="Emoji Clicker", page_icon="🍪")
 
-# Spiel-Einstellungen
-GRID_SIZE = 10
+st.title("🍪 Cookie Clicker Deluxe")
 
-# Initialisierung des Spielzustands
-if 'player_pos' not in st.session_state:
-    st.session_state.player_pos = [0, 0]
-    st.session_state.goal_pos = [9, 9]
-    st.session_state.score = 0
-    st.session_state.message = "Nutze WASD und Enter zum Bewegen!"
+# Spielstand im Session State speichern
+if 'cookies' not in st.session_state:
+    st.session_state.cookies = 0
+if 'auto_clicker' not in st.session_state:
+    st.session_state.auto_clicker = 0
+if 'multiplier' not in st.session_state:
+    st.session_state.multiplier = 1
 
-def move_player(direction):
-    x, y = st.session_state.player_pos
-    if direction == 'w' and x > 0: x -= 1
-    elif direction == 's' and x < GRID_SIZE - 1: x += 1
-    elif direction == 'a' and y > 0: y -= 1
-    elif direction == 'd' and y < GRID_SIZE - 1: y += 1
+# --- LOGIK ---
+
+# Kosten für Upgrades
+cost_multiplier = 10 * (st.session_state.multiplier ** 2)
+cost_auto = 50 + (st.session_state.auto_clicker * 20)
+
+# --- UI LAYOUT ---
+
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.header(f"Kontostand: {st.session_state.cookies} 🍪")
     
-    st.session_state.player_pos = [x, y]
+    # Der Haupt-Button
+    if st.button("KEKS BACKEN! 🍪", use_container_width=True):
+        st.session_state.cookies += 1 * st.session_state.multiplier
+        st.rerun()
+
+with col2:
+    st.subheader("Shop 🛒")
     
-    # Check ob Ziel erreicht
-    if st.session_state.player_pos == st.session_state.goal_pos:
-        st.session_state.score += 1
-        st.session_state.message = "Gefunden! Neues Ziel generiert."
-        st.session_state.goal_pos = [random.randint(0, GRID_SIZE-1), random.randint(0, GRID_SIZE-1)]
-
-# UI Layout
-st.title("🕹️ Streamlit Mini-Quest")
-st.write(f"**Score:** {st.session_state.score} | {st.session_state.message}")
-
-# Eingabe für Steuerung
-control = st.text_input("Steuerung (W/A/S/D eingeben + Enter):", key="input").lower()
-
-if control:
-    if control in ['w', 'a', 's', 'd']:
-        move_player(control)
-    # Input feld leeren (Trick über Session State)
-    st.rerun()
-
-# Spielfeld zeichnen
-grid = ""
-for r in range(GRID_SIZE):
-    row_str = ""
-    for c in range(GRID_SIZE):
-        if [r, c] == st.session_state.player_pos:
-            row_str += "🟦 " # Spieler
-        elif [r, c] == st.session_state.goal_pos:
-            row_str += "🟩 " # Ziel
+    # Upgrade 1: Stärkerer Klick
+    if st.button(f"Stärkerer Klick ({cost_multiplier} 🍪)"):
+        if st.session_state.cookies >= cost_multiplier:
+            st.session_state.cookies -= cost_multiplier
+            st.session_state.multiplier += 1
+            st.success("Upgrade gekauft!")
+            st.rerun()
         else:
-            row_str += "⬜ " # Boden
-    grid += row_str + "\n\n"
+            st.error("Zu wenig Kekse!")
 
-st.markdown(f"```\n{grid}\n```")
+    # Upgrade 2: Auto-Clicker
+    if st.button(f"Auto-Backofen ({cost_auto} 🍪)"):
+        if st.session_state.cookies >= cost_auto:
+            st.session_state.cookies -= cost_auto
+            st.session_state.auto_clicker += 1
+            st.success("Ofen installiert!")
+            st.rerun()
+        else:
+            st.error("Zu wenig Kekse!")
 
-# Anleitung
-st.info("Klicke in das Textfeld, tippe einen Buchstaben (w, a, s oder d) und drücke Enter.")
+# Info-Bereich
+st.divider()
+st.write(f"Klick-Stärke: **{st.session_state.multiplier}** | Automatische Kekse/Sekunde: **{st.session_state.auto_clicker}**")
+
+# Automatisches Backen simulieren
+if st.session_state.auto_clicker > 0:
+    st.info(f"Deine Öfen backen gerade... {st.session_state.auto_clicker} Kekse pro Sekunde.")
+    time.sleep(1) # Kurze Pause
+    st.session_state.cookies += st.session_state.auto_clicker
+    st.rerun()
